@@ -1,0 +1,68 @@
+stages:
+  - test
+  - sonarTest
+  - deploy
+
+test:
+  stage: test
+  script: 
+    - apt-get update
+    - apt-get install -y curl
+    - curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
+    - export NVM_DIR="$HOME/.nvm"
+    - '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"'
+    - source "$NVM_DIR/nvm.sh"
+    - cd ./backend
+    # - CI=false npm install
+    - nvm install --lts=fermium
+    - npm install
+    - npm run coverage
+  artifacts:
+    paths: 
+      - backend/coverage/lcov.info
+
+sonarTest:
+  stage: sonarTest 
+  image: 
+    name: sonarsource/sonar-scanner-cli:latest 
+    entrypoint: [""] 
+  variables: 
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar" # Defines the location of the analysis task cache 
+    GIT_DEPTH: "0" # Tells git to fetch all the branches of the project, required by the analysis task 
+  cache: 
+    key: "${CI_JOB_NAME}"
+    paths: 
+      - .sonar/cache 
+  script:
+    - sonar-scanner -Dsonar.projectKey=cravate -Dsonar.sources=backend -Dsonar.host.url=http://34.201.249.84:9000 -Dsonar.token=sqp_1f0696df7b143678f04e1269c6abd00f3e859d7b 
+  only: 
+    - main 
+  dependencies: 
+    - test
+
+deploy:
+  stage: deploy
+  variables:
+    GIT_STRATEGY: fetch
+  script:
+    - apt-get update
+    - apt-get install -y curl
+    - apt-get install -y openssh-client
+    - apt-get install -y git
+    # - curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
+    # - export NVM_DIR="$HOME/.nvm"
+    # - '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"'
+    # - source "$NVM_DIR/nvm.sh"
+    - echo "$SSH_KEY" > id_rsa
+    - chmod 600 id_rsa
+    - export GIT_SSH_COMMAND="ssh -o 'StrictHostKeyChecking=no' -i $PWD/id_rsa"
+    - git config --global credential.helper store # store the credentials for future use
+    - git remote set-url origin git@git.cs.dal.ca:courses/2023-winter/csci-5308/group20.git # set the remote URL to use SSH
+    - git checkout main
+    - git pull # now Git will use the SSH key for authentication
+    - ssh -o "StrictHostKeyChecking=no" -i id_rsa ec2-user@3.239.61.7 'cd group20/backend && nvm install --lts=fermium && npm install && pm2 restart index.js'
+  only:
+    - main
+  needs:
+    - job: test
+      artifacts: true
